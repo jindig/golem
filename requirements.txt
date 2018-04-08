@@ -57,3 +57,4 @@ raven
 Golem-Messages==1.17.2
 -e git://github.com/golemfactory/golem-smart-contracts-interface.git@e1b1f4cafeaf73035effaad501d3b04770044ce6#egg=golem_sci
 html2text==2018.1.9
+zxcvbn-python
