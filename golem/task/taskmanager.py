@@ -1,5 +1,7 @@
 import logging
+import os
 import pickle
+import shutil
 import time
 from pathlib import Path
 from typing import Optional, Dict, List
@@ -17,7 +19,7 @@ from golem.resource.dirmanager import DirManager
 from golem.resource.hyperdrive.resourcesmanager import \
     HyperdriveResourceManager
 from golem.task.result.resultmanager import EncryptedResultPackageManager
-from golem.task.taskbase import TaskEventListener, Task
+from golem.task.taskbase import TaskEventListener, Task, ResultType
 from golem.task.taskkeeper import CompTaskKeeper, compute_subtask_value
 from golem.task.taskrequestorstats import RequestorTaskStatsManager
 from golem.task.taskstate import TaskState, TaskStatus, SubtaskStatus, \
@@ -377,6 +379,40 @@ class TaskManager(TaskEventListener):
                                  subtask_id=ctd['subtask_id'],
                                  op=SubtaskOp.ASSIGNED)
         return ctd, False, extra_data.should_wait
+
+    def copy_results(self, old_task_id, new_task_id, subtask_ids_to_copy):
+        try:
+            old_task = self.tasks[old_task_id]
+            new_task = self.tasks[new_task_id]
+            assert isinstance(old_task, CoreTask)
+            assert isinstance(new_task, CoreTask)
+        except (KeyError, AssertionError):
+            logger.exception(
+                'Cannot copy results from task %r to %r',
+                old_task_id, new_task_id)
+            return
+
+        subtasks_to_copy = {
+            subtask['start_task']: subtask for subtask in
+            map(lambda id_: old_task.subtasks_given[id_], subtask_ids_to_copy)
+        }
+
+        # Generate all subtasks for the new task
+        while new_task.needs_computation():
+            new_task.query_extra_data(0)
+
+        for new_subtask_id, new_subtask in new_task.subtasks_given:
+            old_subtask = subtasks_to_copy.get(new_subtask['start_task'])
+
+            if old_subtask:  # Copy results from old subtask
+                new_task.copy_subtask_results(new_subtask_id, old_subtask)
+                self.notice_task_updated(
+                    task_id=new_task_id,
+                    subtask_id=new_subtask['subtask_id'],
+                    op=SubtaskOp.FINISHED)
+
+            else:  # Restart subtask to get it computed
+                self.restart_subtask(new_subtask['node_id'])
 
     def get_tasks_headers(self):
         ret = []

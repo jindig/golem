@@ -2,8 +2,10 @@ import abc
 import decimal
 import logging
 import os
+import shutil
 import uuid
 from enum import Enum
+from pathlib import Path
 from typing import Type
 
 import golem_messages.message
@@ -23,7 +25,7 @@ from golem.resource.dirmanager import DirManager
 from golem.task.taskbase import Task, TaskHeader, TaskBuilder, ResultType, \
     TaskTypeInfo
 from golem.task.taskclient import TaskClient
-from golem.task.taskstate import SubtaskStatus
+from golem.task.taskstate import SubtaskStatus, SubtaskOp
 from golem.verification.verifier import SubtaskVerificationState
 
 logger = logging.getLogger("apps.core")
@@ -503,6 +505,34 @@ class CoreTask(Task):
 
         client.start()
         return AcceptClientVerdict.ACCEPTED
+
+    def copy_subtask_results(self, subtask_id, old_subtask):
+        new_subtask = self.subtasks_given[subtask_id]
+
+        new_subtask['node_id'] = old_subtask['node_id']
+        new_subtask['perf'] = old_subtask['perf']
+        new_subtask['ctd']['performance'] = \
+            old_subtask['ctd']['performance']
+
+        old_tmp_dir = Path(old_subtask['tmp_dir'])
+        new_tmp_dir = Path(self.tmp_dir)
+
+        # FIXME: Don't define the file name format here
+        old_result_path = old_tmp_dir / '{}.{}.zip'.format(
+            old_subtask['ctd']['task_id'], old_subtask['subtask_id'])
+        new_result_path = new_tmp_dir / '{}.{}.zip'.format(
+            self.task_definition.task_id, subtask_id)
+        shutil.copy(old_result_path, new_result_path)
+
+        self._accept_client(new_subtask['node_id'])
+        self.result_incoming(subtask_id)
+        self.accept_results(
+            subtask_id=subtask_id,
+            result_files=self.results[subtask_id])
+        self.interpret_task_results(
+            subtask_id=subtask_id,
+            task_results=new_result_path,
+            result_type=ResultType.DATA)
 
 
 def accepting(query_extra_data_func):
